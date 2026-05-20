@@ -1,0 +1,28 @@
+/.bsp/
+target/
+# sbt
+target/
+project/target/
+project/project/
+
+# IntelliJ
+.idea/
+*.iml
+out/
+
+# Metals / Bloop
+.bloop/
+.metals/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+
+# Compiled classes
+*.class
