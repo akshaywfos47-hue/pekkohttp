@@ -4,7 +4,8 @@ import example.models.{Student, Subject}
 import example.repository.StudentRepository
 import example.requestdto.CreateStudentWithSubjectRequest
 
-import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.{ExecutionContext, Future}
 
 class StudentService(
 
@@ -94,4 +95,8 @@ class StudentService(
     studentRepository
       .deleteStudent(id)
   }
+
+  def getStudentCount() =
+    studentRepository.getAllStudents()
+      .map(_.size)
 }

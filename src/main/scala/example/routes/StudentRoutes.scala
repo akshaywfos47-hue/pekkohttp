@@ -1,115 +1,181 @@
 package example.routes
 
-import example.models.{Student, StudentSubjectResponse, Subject}
-import example.repository.StudentRepository
+import example.actors.StudentActor
+import example.models.{Student, Subject}
 import example.requestdto.CreateStudentWithSubjectRequest
-import org.apache.pekko.http.scaladsl.server.Directives._
-import spray.json._
-import org.apache.pekko.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import example.service.ServiceRegistry
+import org.apache.pekko.actor.typed.{ActorRef, Scheduler}
+import org.apache.pekko.actor.typed.scaladsl.AskPattern.Askable
+import org.apache.pekko.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
+import org.apache.pekko.http.scaladsl.server.Directives._
+import org.apache.pekko.http.scaladsl.server.Route
+import org.apache.pekko.util.Timeout
+import spray.json._
+
+import scala.concurrent.duration.DurationInt
+import scala.util.{Failure, Success}
 
 object StudentRoutes extends DefaultJsonProtocol {
 
-  implicit val studentFormat = jsonFormat5(Student)
-  implicit val subjectFormat=jsonFormat4(Subject)
-  implicit val requestFormat = jsonFormat2(CreateStudentWithSubjectRequest)
+  case class MessageResponse(message: String)
+  case class CountResponse(count: Int)
+
+  // http response message when  the methods returns int because we should always send string or json as a http response
+  implicit val messageResponseFormat: RootJsonFormat[MessageResponse] = jsonFormat1(MessageResponse)
+
+  implicit val studentFormat: RootJsonFormat[Student] = jsonFormat5(Student)
+  implicit val subjectFormat: RootJsonFormat[Subject] =jsonFormat4(Subject)
+  implicit val requestFormat: RootJsonFormat[CreateStudentWithSubjectRequest] = jsonFormat2(CreateStudentWithSubjectRequest)
+  implicit val errorFormat: RootJsonFormat[ErrorResponse] = jsonFormat1(ErrorResponse)
+  implicit val countResponseFormat = jsonFormat1(CountResponse)
+
+  implicit val timeout: Timeout = 3.seconds
 
 
+  case class ErrorResponse(
+                            message: String
+                          )
 
-  val route =
+  def apply(studentActor: ActorRef[StudentActor.Command])
+           (implicit scheduler: Scheduler): Route =
+
+
     pathPrefix("students") {
       concat(
       pathEndOrSingleSlash {
         concat(
 
         // CREATE
-        post {
-          entity(as[Student]) { student =>
-            onSuccess(
-              ServiceRegistry
-                .studentService
-                .addStudent(student)
-            ) { _ =>
+          post {
+            entity(as[Student]) { student =>
+              onSuccess(
+                studentActor.ask(
+                  replyTo =>
+                    StudentActor.AddStudent(
+                      student,
+                      replyTo
+                    )
+                )
+              ) { response =>
 
-              complete(s"Student ${student.name} added")
+                complete(response)
+              }
             }
-          }
-        },
+          },
+
+
 
 
         // GET ALL
-        get {
-          onSuccess(
-            ServiceRegistry
-              .studentService
-              .getAllStudents()
-          ) { result =>
-
-            complete(result)
+          get {
+            onSuccess(
+              studentActor.ask(
+                replyTo =>
+                  StudentActor
+                    .GetAllStudents(replyTo)
+              )
+            ) { result =>
+              complete(result)
+            }
           }
-        }
         )
-
       },
 
         // PAGINATION
         path("pagination") {
-
           get {
-
             parameters(
-
               "page".as[Int],
-
               "size".as[Int]
-
             ) { (page, size) =>
-
-              onSuccess(
-                ServiceRegistry.studentService.getStudentsPaginated(
-                  page,
-                  size
+              onComplete(
+                studentActor.ask(
+                  replyTo =>
+                    StudentActor.GetStudentsPaginated(
+                      page,
+                      size,
+                      replyTo
+                    )
                 )
-              ) { result =>
-                complete(result)
+              ) {
+                case Success(result) =>
+                  complete(result)
+
+                case Failure(ex) =>
+                  complete(
+                    500,
+                    ErrorResponse(ex.getMessage)
+                  )
               }
             }
           }
         },
 
+        path("count") {
+          get {
+            onSuccess(
+              studentActor.ask[Int](
+                replyTo =>
+                  StudentActor.GetCount(replyTo)
+              )
+            ) { count =>
+              complete(
+               CountResponse( count)
+              )
+            }
+          }
+        },
 
         //get by query parameter
 
         path("search"){
           get{
             parameters("age".as[Int]){age=>
-              onSuccess(
-                ServiceRegistry.studentService.getStudentsByAge(age)
-              ) { result =>
+              onComplete(
+                studentActor.ask(
+                  replyTo =>
+                    StudentActor.GetStudentsByAge(
+                      age,
+                      replyTo
+                    )
+                )
+              ) {
+                case Success(result) =>
+                  complete(result)
 
-                complete(result)
+                case Failure(ex) =>
+                  complete(
+                    500,
+                    ErrorResponse(ex.getMessage)
+                  )
               }
-
             }
           }
-
         },
-
 
         // batch insert
         path("batch") {
-
           post {
-
             entity(as[Seq[Student]]) { studentList =>
 
-              onSuccess(
+              onComplete(
+                studentActor.ask(
+                  replyTo =>
+                    StudentActor.AddStudents(
+                      studentList,
+                      replyTo
+                    )
+                )
+              ) {
 
-                ServiceRegistry.studentService.addStudents(studentList)
+                case Success(_) =>
+                  complete(MessageResponse("inserted many students "))
 
-              ) { result =>
-
-                complete(s"Inserted ${result.getOrElse(0)} students")
+                case Failure(ex) =>
+                  complete(
+                    500,
+                    ErrorResponse(ex.getMessage)
+                  )
               }
             }
           }
@@ -119,12 +185,24 @@ object StudentRoutes extends DefaultJsonProtocol {
         path("transaction") {
           post {
             entity(as[CreateStudentWithSubjectRequest]) { request =>
-              onSuccess(
-                ServiceRegistry.studentService.addStudentWithSubject(
-                  request
+              onComplete(
+                studentActor.ask(
+                  replyTo =>
+                    StudentActor.AddStudentWithSubject(
+                      request,
+                      replyTo
+                    )
                 )
               ) {
-                complete("Student and Subject inserted successfully")
+
+                case Success(result) =>
+                  complete(MessageResponse(s"transaction successful __ $result"))
+
+                case Failure(ex) =>
+                  complete(
+                    500,
+                    ErrorResponse(ex.getMessage)
+                  )
               }
             }
           }
@@ -137,11 +215,24 @@ object StudentRoutes extends DefaultJsonProtocol {
       path(IntNumber) { id =>
         concat(
         get {
-          onSuccess(
-            ServiceRegistry.studentService.getStudentById(id)
-          ) { result =>
+          onComplete(
+            studentActor.ask(
+              replyTo =>
+                StudentActor.GetStudentById(
+                  id,
+                  replyTo
+                )
+            )
+          )  {
 
-            complete(result)
+            case Success(result) =>
+              complete(result)
+
+            case Failure(ex) =>
+              complete(
+                500,
+                ErrorResponse(ex.getMessage)
+              )
           }
         } ,
 
@@ -149,22 +240,49 @@ object StudentRoutes extends DefaultJsonProtocol {
         // UPDATE
         put {
           entity(as[Student]) { student =>
-            onSuccess(
-              ServiceRegistry.studentService.updateStudent(id, student)
-            ) { _ =>
+            onComplete(
+              studentActor.ask(
+                replyTo =>
+                  StudentActor.UpdateStudent(
+                    id,
+                    student,
+                    replyTo
+                  )
+              )
+            ){
 
-              complete(s"Student $id updated")
+              case Success(result) =>
+                complete(MessageResponse(s"update successfull roe affected - $result"))
+
+              case Failure(ex) =>
+                complete(
+                  500,
+                  ErrorResponse(ex.getMessage)
+                )
             }
           }
         } ,
 
         // DELETE
         delete {
-          onSuccess(
-            ServiceRegistry.studentService.deleteStudent(id)
-          ) { _ =>
+          onComplete(
+            studentActor.ask(
+              replyTo =>
+                StudentActor.DeleteStudent(
+                  id,
+                  replyTo
+                )
+            )
+          ) {
 
-            complete(s"Student $id deleted")
+            case Success(result) =>
+              complete(MessageResponse(s"deleted successfull row affected - $result"))
+
+            case Failure(ex) =>
+              complete(
+                500,
+                ErrorResponse(ex.getMessage)
+              )
           }
         }
         )
