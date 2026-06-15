@@ -14,6 +14,9 @@ lazy val root = (project in file("."))
       "com.typesafe.slick" %% "slick" % "3.5.1",
       "org.postgresql" % "postgresql" % "42.7.3",
       "com.typesafe.slick" %% "slick-hikaricp" % "3.5.1",
+      "org.apache.pekko" %% "pekko-persistence-typed" % pekkoVersion,
+
+
       munit % Test
     )
   )

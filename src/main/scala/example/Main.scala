@@ -1,13 +1,13 @@
 package example
 
-import example.actors.StudentActor
+import example.actors.{StudentActor, SubjectPersistentActor}
 import example.routes.{StudentRoutes, SubjectRoutes, UserRoutes}
 import example.service.ServiceRegistry
 import org.apache.pekko.actor.typed.{ActorSystem, Scheduler}
 import org.apache.pekko.actor.typed.scaladsl.Behaviors
 import org.apache.pekko.http.scaladsl.server.Directives._
-import scala.concurrent.duration._
 
+import scala.concurrent.duration._
 import scala.concurrent.Await
 import scala.io.StdIn
 
@@ -34,6 +34,11 @@ object Main {
 // see service registry here dependency injection is done
     val studentActor = system.systemActorOf(StudentActor(ServiceRegistry.studentService,  initialCount), "student-actor")
 
+    val subjectActor =
+      system.systemActorOf(
+        SubjectPersistentActor(),
+        "subject-persistent-actor"
+      )
 
 
     // COMBINE ALL ROUTES
@@ -41,7 +46,7 @@ object Main {
       concat(
         UserRoutes.route,
         StudentRoutes(studentActor),
-        SubjectRoutes.route
+        SubjectRoutes(subjectActor)
       )
 
     // START SERVER
