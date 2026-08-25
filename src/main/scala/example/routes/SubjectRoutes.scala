@@ -67,16 +67,19 @@ object SubjectRoutes extends DefaultJsonProtocol {
             },
 
             // GET ALL
+            // GET ALL
             get {
 
               onSuccess(
-                ServiceRegistry.subjectService.getAllSubjects()
+                subjectActor.ask(
+                  replyTo =>
+                    SubjectPersistentActor.GetSubjects(replyTo)
+                )
               ) { result =>
 
                 complete(result)
               }
             },
-
           )
         },
         path("join") {
